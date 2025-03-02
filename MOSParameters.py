@@ -103,6 +103,34 @@ class boolMosParameter(mosParameter):
         return self._boolValue;
 ################################################################
 ################################################################
+def doLog(mess = '', end = None, error = False):
+    if LOGOPT & 2 and (not LOGERRONLY or error):
+        syslog.syslog(syslog.LOG_ERR if error else syslog.LOG_INFO, mess)
+    if LOGOPT & 1:
+        print(mess,end=end)
+################################################################
+################################################################
+# Try to deal with Signals
+# - declare an instance of this class
+# - class will trap signals, allowing a cleanup before termination
+# - have main loop in program continue until isSet() is true
+# - use wait(seconds) instead of sleep
+class sigExit:
+    def __init__(self):
+        self._exit = Event()
+        for sig in ('TERM', 'HUP', 'INT'):
+            signal.signal(getattr(signal, 'SIG'+sig), self._quitter)
+
+    def _quitter(self, signo, _frame):
+        doLog("Interrupted by %d, shutting down" % signo,error=True)
+        self._exit.set()
+
+    def isSet(self):
+        return self._exit.is_set()
+
+    def wait(self,seconds):
+        self._exit.wait(seconds)################################################################
+################################################################
 # Convert bytes object containing ASCII representation of
 # a number into an integer.
 def intFromASCBytes(byteObject):
