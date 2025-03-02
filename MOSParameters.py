@@ -199,3 +199,5 @@ def finishMQTT(mosClient):
     mosClient.disconnect()
 ################################################################
 ################################################################
+def __init__(title = "MOSLog"):
+  syslog.openlog(ident=title)
