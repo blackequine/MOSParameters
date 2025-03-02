@@ -10,7 +10,6 @@ from socket import gethostname
 ZEROUSER="fieldcontrol"
 ZEROPASSWD="excrement69Yuk"
 MQTTCONNECTTIMEOUT=5 #seconds
-CONTROLROOT="climateMonitor/"
 ################################################################
 ################################################################
 # Base class to manage parameters read from MQTT
