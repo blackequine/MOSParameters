@@ -1,6 +1,10 @@
 import math
 import time
 import paho.mqtt.client as mqtt
+import syslog
+import signal
+from threading import Event
+from socket import gethostname
 ################################################################
 ################################################################
 # Base class to manage parameters read from MQTT
