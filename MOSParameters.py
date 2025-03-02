@@ -7,23 +7,29 @@ from threading import Event
 from socket import gethostname
 ################################################################
 ################################################################
+ZEROUSER="fieldcontrol"
+ZEROPASSWD="excrement69Yuk"
+MQTTCONNECTTIMEOUT=5 #seconds
+CONTROLROOT="climateMonitor/"
+################################################################
+################################################################
 # Base class to manage parameters read from MQTT
 # 
 class mosParameter:
 
     #override and call this
-    def __init__(self,entityID,mosClient,callbackFn):
+    def __init__(self,entityID,mosClient,callbackFn,rootTopic):
         self._callbackLink = None
         self._onConnectLink = None
-        self._myTopic = BATTROOT+'/'+entityID.lower()
+        self._myTopic = rootTopic+'/'+entityID.lower()
         self._entityID = entityID
         self._addMosCallback(mosClient,callbackFn)
         self._addMosOnConnectCallback(mosClient,self._onConnect)
-        self._doSubscribe()
+        self._doSubscribe(mosClient)
         
     #do NOT override
     # subscribe to parameter topic on MQTT server
-    def _doSubscribe(self):
+    def _doSubscribe(self,mosClient):
         mosClient.subscribe(self._myTopic, 0)
         
     #do NOT override
@@ -31,7 +37,7 @@ class mosParameter:
     def _onConnect(self,client, userdata, flags, rc):
         if self._onConnectLink:
             self._onConnectLink(client, userdata, flags, rc)
-        self._doSubscribe()
+        self._doSubscribe(client)
         
     #do NOT override
     # build single linked list to subscribe to all parameter topics
@@ -61,10 +67,10 @@ class mosParameter:
 ################################################################
 class intMosParameter(mosParameter):
 
-    def __init__(self,entityID,mosClient,intValue):
+    def __init__(self,entityID,mosClient,intValue,rootTopic):
         #v1.07 supplied initial value will be overwritten by persistent value from MQTT
         self._intValue = intValue
-        mosParameter.__init__(self,entityID,mosClient,self._onMessage)
+        mosParameter.__init__(self,entityID,mosClient,self._onMessage,rootTopic)
 
     def _onMessage(self,client, userdata, message):
         mosParameter._onMessage(self,client,userdata,message)
@@ -77,10 +83,10 @@ class intMosParameter(mosParameter):
 ################################################################
 class floatMosParameter(mosParameter):
 
-    def __init__(self,entityID,mosClient,floatValue):
+    def __init__(self,entityID,mosClient,floatValue,rootTopic):
         #v1.07 supplied initial value will be overwritten by persistent value from MQTT
         self._floatValue = floatValue
-        mosParameter.__init__(self,entityID,mosClient,self._onMessage)
+        mosParameter.__init__(self,entityID,mosClient,self._onMessage,rootTopic)
 
     def _onMessage(self,client, userdata, message):
         mosParameter._onMessage(self,client,userdata,message)
@@ -93,10 +99,10 @@ class floatMosParameter(mosParameter):
 ################################################################
 class boolMosParameter(mosParameter):
 
-    def __init__(self,entityID,mosClient,boolValue):
+    def __init__(self,entityID,mosClient,boolValue,rootTopic):
         #v1.07 supplied initial value will be overwritten by persistent value from MQTT
         self._boolValue = boolValue
-        mosParameter.__init__(self,entityID,mosClient,self._onMessage)
+        mosParameter.__init__(self,entityID,mosClient,self._onMessage,rootTopic)
 
     def _onMessage(self,client, userdata, message):
         mosParameter._onMessage(self,client,userdata,message)
@@ -107,11 +113,23 @@ class boolMosParameter(mosParameter):
         return self._boolValue;
 ################################################################
 ################################################################
-def doLog(mess = '', end = None, error = False):
-    if LOGOPT & 2 and (not LOGERRONLY or error):
-        syslog.syslog(syslog.LOG_ERR if error else syslog.LOG_INFO, mess)
-    if LOGOPT & 1:
-        print(mess,end=end)
+
+class doLog:
+
+    def __init__(self, logToSyslog = True, logToStdErr = True, logErrorsOnly=False):
+        self._logErrOnly = logErrorsOnly
+        self._stderr = logToStdErr
+        self._syslog = logToSyslog
+
+    def log(self, mess = '', end = None, error = False):
+        if self._syslog and (not self._logErrOnly or error):
+            syslog.syslog(syslog.LOG_ERR if error else syslog.LOG_INFO, mess)
+        if self._stderr:
+            print(mess,end=end)
+
+    def close(self):
+        syslog.closelog()
+
 ################################################################
 ################################################################
 # Try to deal with Signals
@@ -120,20 +138,22 @@ def doLog(mess = '', end = None, error = False):
 # - have main loop in program continue until isSet() is true
 # - use wait(seconds) instead of sleep
 class sigExit:
-    def __init__(self):
+    def __init__(self,logger):
         self._exit = Event()
+        self._logger = logger
         for sig in ('TERM', 'HUP', 'INT'):
             signal.signal(getattr(signal, 'SIG'+sig), self._quitter)
 
     def _quitter(self, signo, _frame):
-        doLog("Interrupted by %d, shutting down" % signo,error=True)
+        self._logger.log("Interrupted by %d, shutting down" % signo,error=True)
         self._exit.set()
 
     def isSet(self):
         return self._exit.is_set()
 
     def wait(self,seconds):
-        self._exit.wait(seconds)################################################################
+        self._exit.wait(seconds)
+################################################################
 ################################################################
 # Convert bytes object containing ASCII representation of
 # a number into an integer.
@@ -175,8 +195,8 @@ def on_connect(client, userdata, flags, rc):
 ################################################################
 # MQTT utilities
 #
-def setupMQTT(mosServer = "piserve", mosPort=1883):
-    mosClient = mqtt.Client(gethostname())
+def setupMQTT(rootTopic,mosServer = "piserve", mosPort=1883):
+    mosClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1,gethostname(),rootTopic)
     mosClient.connected_flag=False
     mosClient.connected_rc=0
     mosClient.on_connect = on_connect #bind callback
@@ -188,11 +208,11 @@ def setupMQTT(mosServer = "piserve", mosPort=1883):
         timeout -= 1
         time.sleep(1)
     return mosClient
-def publishMQTT(mosClient,key,value,relays):
+def publishMQTT(mosClient,key,value,rootTopic):
     published_value = value
-    mosClient.publish(CONTROLROOT+key,'{0:.3f}'.format(published_value),retain=True)
-    doLog("{0:7}: ".format(key), end='')
-    doLog("{0:>6.3f} {1}".format(published_value, unit))
+    mosClient.publish(rootTopic+key,'{0:.3f}'.format(published_value),retain=True)
+    #doLog("{0:7}: ".format(key), end='')
+    #doLog("{0:>6.3f} {1}".format(published_value, unit))
 #Shutdown MQTT
 def finishMQTT(mosClient):
     mosClient.loop_stop()
